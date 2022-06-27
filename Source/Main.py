@@ -4,8 +4,10 @@ from enum import Enum
 import configparser
 import requests
 import logging
+import json
 import os
 import re
+import copy
 
 
 PROJECT_PATH = Path(__file__).resolve().parent.parent
@@ -32,9 +34,7 @@ class ConnectAPI(object):
 
         self.api_address = address
         self.status_code = None
-        self.raw_data = None
-        self.formattedKeys = {}
-        self.formattedRawData = {}
+        self.raw_data = ''
 
     @abstractmethod
     def run(self):
@@ -52,7 +52,7 @@ class ConnectAPI(object):
         if self.status_code != 200:
             LOGGER.log(logging.INFO, f'Status error on connect: {self.getStatusCode()}')
             return State.ERROR
-        self.raw_data = response_API.text
+        self.raw_data = json.loads(response_API.text)
         self.formatData()
 
     def getStatusCode(self):
@@ -67,8 +67,8 @@ class DecodeAPI1(ConnectAPI):
 
         super().__init__(address)
 
-        self.transformedKeys = ['id', 'name', 'active', 'description', 'boxes', 'free_boxes', 'free_bikes', 'free_ratio', 'coordinates']
-        self.transformedData = {}
+        self.transformedKeys = ["id", "name", "active", "description", "boxes", "free_boxes", "free_bikes", "free_ratio", "coordinates"]
+        self.transformedData = []
 
     def run(self):
         if self.connect() == State.ERROR:
@@ -78,40 +78,33 @@ class DecodeAPI1(ConnectAPI):
         print(f'The result to part 1:\n{list(self.getTransformedData().values())}')
 
     def formatData(self):
-        try:
-            sectionPattern = re.compile(r'{.*?}')
-            for m in re.finditer(sectionPattern, self.raw_data):
-                idKey = re.search('"id":[0-9]*', m[0])
-                if idKey:
-                    apiID = int(idKey.group(0).split(':')[1])
-                    self.formattedRawData[apiID] = eval(m[0])
-
-        except AttributeError:
-            LOGGER.log(logging.ERROR, f'The API data could not be formatted')
-            return State.ERROR
+        # for _station in self.raw_data:
+        #     self.formattedData[_station["id"]] = _station
+        pass
 
     def transformData(self):
-        for _key, _station in self.formattedRawData.items():
-            if self.passFilter(_key):
+        for _station in self.raw_data:
+            for _key, _value in _station.items():
+                if self.passFilter(_station):
 
-                # Copy the existing key-value pairs
-                self.transformedData[_key] = {}
-                for key in _station.keys():
-                    if key in self.transformedKeys:
-                        self.transformedData[_key][key] = _station[key]
+                    copiedStation = copy.deepcopy(_station)
+                    # Copy the existing key-value pairs
+                    self.transformedData.append(copiedStation)  # TODO Maybe done need deepcopy
 
-                # Add the new key-value pairs
-                self.transformedData[_key]["active"] = _station["status"] == "aktiv"
-                self.transformedData[_key]["free_ratio"] = _station["free_boxes"] / _station["boxes"]
-                self.transformedData[_key]["coordinates"] = [_station["longitude"], _station["latitude"]]
+                    # Add the new key-value pairs
+                    index = len(self.transformedData) - 1
+                    self.transformedData[index]["active"] = copiedStation["status"] == "aktiv"
+                    self.transformedData[index]["free_ratio"] = copiedStation["free_boxes"] / copiedStation["boxes"]
+                    self.transformedData[index]["coordinates"] = [copiedStation["longitude"], copiedStation["latitude"]]
 
-                # Reorder the dict to match the expected structure
-                self.transformedData[_key] = {k: self.transformedData[_key][k] for k in self.transformedKeys}
+                    # Reorder the list to match the expected structure
+                    # TODO Continue here
+                    self.transformedData[index] = [self.transformedData[_key][k] for k in self.transformedKeys]
 
         self.sortData()
 
-    def passFilter(self, _id):
-        return self.formattedRawData[_id]["free_bikes"] != 0
+    def passFilter(self, station):
+        return station["free_bikes"] != 0
 
     def sortData(self):
         secondarySorted = dict(sorted(self.transformedData.items(), key=lambda item: item[1]["name"]))
@@ -148,14 +141,14 @@ class DecodeAPI2(ConnectAPI):
             if idKey:
                 foundText = idKey.group(0)
                 address = foundText.replace('"name": "', '')
-                self.formattedRawData["address"] = address
+                self.formattedData["address"] = address
 
         except AttributeError:
             LOGGER.log(logging.ERROR, f'The API data could not be formatted')
             return State.ERROR
 
     def getAddress(self):
-        return self.formattedRawData["address"]
+        return self.formattedData["address"]
 
 
 if __name__ == "__main__":
@@ -165,5 +158,5 @@ if __name__ == "__main__":
 
     apiEndpoint1 = DecodeAPI1('https://wegfinder.at/api/v1/stations')
     apiEndpoint1.run()
-    apiEndpoint1.setAddress()
+    # apiEndpoint1.setAddress()
     print(f'The result to part 2:\n{list(apiEndpoint1.getTransformedData().values())}')
